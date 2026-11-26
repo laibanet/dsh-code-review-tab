@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "代码改动",
+    "description": "右侧栏标签页：逐行查看最近的 Git 提交，以及 DSH 刚刚修改、尚未提交的代码。",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,3 @@
+- insert:
+    - id: code-review-tab
+      name: 'dsh-code-review-tab'

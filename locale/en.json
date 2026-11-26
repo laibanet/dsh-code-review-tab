@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Code changes",
+    "description": "A right-sidebar tab that shows line-level git diffs: recent commits and the uncommitted edits an agent just made.",
+    "detail": "docs/DETAIL.md"
+  }
+}
