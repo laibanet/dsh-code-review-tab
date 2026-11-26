@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.1.1'
+const PLUGIN_VERSION = '2.2.0'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -1754,54 +1754,48 @@ window.__ModuleLoader__.load({
         return set
       }
 
-      const renderDiffPane = (sourceFiles, truncated) => {
-        const active = sourceFiles.find((file) => file.path === selectedPath) || sourceFiles[0]
-        const repoRoot = snapshot && snapshot.repo ? snapshot.repo.root : ''
-        const isEditing = Boolean(active && editingPath === active.path)
-        const marks = isEditing ? changeMarks(active) : []
+      // One editor surface shared by all three views, so every feature (float,
+      // fullscreen, zoom, minimap, ghost rows, save) behaves identically.
+      const renderEditor = (file, base, options) => {
+        const { header = null, empty = null } = options || {}
+        const isEditing = Boolean(file && editingPath === file.path)
+        const marks = isEditing ? changeMarks(file) : []
         const total = isEditing ? draft.split('\n').filter((line) => !line.startsWith(GHOST_MARK)).length : 0
+        const dirtyDraft = stripGhostRows(draft) !== stripGhostRows(draftBaseline)
         return h(
           'div',
           { className: 'crv-diffwrap' },
           h(
             'div',
             { className: 'crv-diff', ref: diffRef },
-            notice
-              ? h(
-                  'div',
-                  { className: 'crv-notice' },
-                  notice,
-                  h('button', { className: 'crv-btn', style: { marginLeft: 'auto' }, onClick: () => setNotice('') }, '×'),
-                )
-              : null,
-            truncated ? h('div', { className: 'crv-note' }, t('state.truncated')) : null,
-            active
+            header,
+            file
               ? h(FileCard, {
-                  file: active,
+                  file,
                   t,
                   editLabel: t('action.editAt'),
                   editing: isEditing,
                   draft,
                   editLine: editTargetLine,
                   draftVersion,
-                  dirty: stripGhostRows(draft) !== stripGhostRows(draftBaseline),
+                  dirty: dirtyDraft,
                   saving,
                   saveError,
                   onDraft: setDraft,
-                  onSave: () => saveDraft(repoRoot),
+                  onSave: () => saveDraft(base),
                   onExitEdit: exitEditing,
                   onRegisterArea: (element) => {
                     editorAreaRef.current = element
                   },
-                  onEdit: (line) => startEditing(active, line, repoRoot),
-                  onEditAt: (line) => startEditing(active, line, repoRoot),
+                  onEdit: (line) => startEditing(file, line, base),
+                  onEditAt: (line) => startEditing(file, line, base),
                   editorMode,
                   onFloat: () => setEditorMode((previous) => (previous === 'inline' ? 'float' : 'inline')),
                   onFull: () => setEditorMode((previous) => (previous === 'inline' ? 'full' : 'inline')),
                   fontSize: editorFontSize,
                   onZoom: zoomEditor,
                 })
-              : h(Empty, { title: t('state.selectFile') }),
+              : empty || h(Empty, { title: t('state.selectFile') }),
           ),
           isEditing && total > 0 ? h(Minimap, { marks, total, onJump: jumpEdit, t }) : null,
           isEditing && editorMode !== 'inline'
@@ -1809,12 +1803,12 @@ window.__ModuleLoader__.load({
                 EditorDialog,
                 {
                   t,
-                  title: active.path,
+                  title: file.path,
                   full: editorMode === 'full',
                   saving,
                   onDock: () => setEditorMode('inline'),
                   onToggleFull: () => setEditorMode(editorMode === 'full' ? 'float' : 'full'),
-                  onSave: () => saveDraft(repoRoot),
+                  onSave: () => saveDraft(base),
                   onClose: exitEditing,
                 },
                 h(
@@ -1823,15 +1817,15 @@ window.__ModuleLoader__.load({
                   h(EditableFileView, {
                     t,
                     draft,
-                    added: addedLines(active),
+                    added: addedLines(file),
                     editing: true,
                     editLine: editTargetLine,
                     draftVersion,
-                    dirty: stripGhostRows(draft) !== stripGhostRows(draftBaseline),
+                    dirty: dirtyDraft,
                     saving,
                     saveError,
                     onDraft: setDraft,
-                    onSave: () => saveDraft(repoRoot),
+                    onSave: () => saveDraft(base),
                     onExit: exitEditing,
                     onRegisterArea: (element) => {
                       editorAreaRef.current = element
@@ -1844,6 +1838,25 @@ window.__ModuleLoader__.load({
               )
             : null,
         )
+      }
+
+      const renderDiffPane = (sourceFiles, truncated) => {
+        const active = sourceFiles.find((file) => file.path === selectedPath) || sourceFiles[0]
+        const repoRoot = snapshot && snapshot.repo ? snapshot.repo.root : ''
+        const header = h(
+          React.Fragment,
+          null,
+          notice
+            ? h(
+                'div',
+                { className: 'crv-notice' },
+                notice,
+                h('button', { className: 'crv-btn', style: { marginLeft: 'auto' }, onClick: () => setNotice('') }, '×'),
+              )
+            : null,
+          truncated ? h('div', { className: 'crv-note' }, t('state.truncated')) : null,
+        )
+        return renderEditor(active, repoRoot, { header })
       }
 
       const renderCommitsList = () => {
@@ -1891,8 +1904,19 @@ window.__ModuleLoader__.load({
         if (turnsUnavailable) return h(Empty, { title: t('state.turnsUnavailable') })
         if (!turns) return h('div', { className: 'crv-note' }, t('state.loading'))
         if (turns.length === 0) return h(Empty, { title: t('state.emptyTurns'), hint: t('state.emptyTurnsHint') })
-        const turnEditing = Boolean(turnDiff && editingPath === turnDiff.path)
-        const turnTotalRows = turnEditing ? draft.split('\n').filter((line) => !line.startsWith(GHOST_MARK)).length : 0
+        const header = h(
+          React.Fragment,
+          null,
+          notice
+            ? h(
+                'div',
+                { className: 'crv-notice' },
+                notice,
+                h('button', { className: 'crv-btn', style: { marginLeft: 'auto' }, onClick: () => setNotice('') }, '×'),
+              )
+            : null,
+          turnDiffError ? h('div', { className: 'crv-error' }, turnDiffError) : null,
+        )
         return h(
           'div',
           { className: 'crv-body' },
@@ -1923,50 +1947,10 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
-          h(
-            'div',
-            { className: 'crv-diffwrap' },
-            h(
-              'div',
-              { className: 'crv-diff', ref: diffRef },
-              notice
-                ? h(
-                    'div',
-                    { className: 'crv-notice' },
-                    notice,
-                    h('button', { className: 'crv-btn', style: { marginLeft: 'auto' }, onClick: () => setNotice('') }, '×'),
-                  )
-                : null,
-              turnDiffError ? h('div', { className: 'crv-error' }, turnDiffError) : null,
-              turnDiff
-                ? h(FileCard, {
-                    file: turnDiff,
-                    t,
-                    editLabel: t('action.editAt'),
-                    editing: editingPath === turnDiff.path,
-                    draft,
-                    editLine: editTargetLine,
-                    draftVersion,
-                    dirty: stripGhostRows(draft) !== stripGhostRows(draftBaseline),
-                    saving,
-                    saveError,
-                    onDraft: setDraft,
-                    onSave: () => saveDraft(scopeRef.current.cwd || ''),
-                    onExitEdit: exitEditing,
-                    onRegisterArea: (element) => {
-                      editorAreaRef.current = element
-                    },
-                    onEdit: (line) => startEditing(turnDiff, line, scopeRef.current.cwd),
-                    onEditAt: (line) => startEditing(turnDiff, line, scopeRef.current.cwd),
-                    fontSize: editorFontSize,
-                    onZoom: zoomEditor,
-                  })
-                : h(Empty, { title: turnFile ? t('state.loading') : t('state.selectFile') }),
-            ),
-            turnDiff && editingPath === turnDiff.path && turnTotalRows > 0
-              ? h(Minimap, { marks: changeMarks(turnDiff), total: turnTotalRows, onJump: jumpEdit, t })
-              : null,
-          ),
+          renderEditor(turnDiff, scopeRef.current.cwd || '', {
+            header,
+            empty: h(Empty, { title: turnFile ? t('state.loading') : t('state.selectFile') }),
+          }),
         )
       }
 

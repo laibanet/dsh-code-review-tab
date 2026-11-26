@@ -38,7 +38,7 @@ dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab
 ```
 
 或者在 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) 下载
-`dsh-code-review-tab-2.1.1.tgz`，用插件管理器安装。
+`dsh-code-review-tab-2.2.0.tgz`，用插件管理器安装。
 
 安装后硬刷新浏览器（`Ctrl+Shift+R`），输入框左侧会出现 **代码改动** 按钮。
 
@@ -117,7 +117,7 @@ From Git (works today):
 dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab.git
 ```
 
-Or download `dsh-code-review-tab-2.1.1.tgz` from
+Or download `dsh-code-review-tab-2.2.0.tgz` from
 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) and install
 it through the Plugin Manager.
 
