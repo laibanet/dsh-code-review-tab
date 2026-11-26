@@ -95,6 +95,12 @@ assert.deepEqual(paths, ['a.txt', 'new.txt', 'sub/b.txt'])
 assert.equal(snap.data.counts.files, 3)
 console.log('snapshot ok:', JSON.stringify({ branch: snap.data.repo.branch, files: paths, counts: snap.data.counts }))
 
+// A user-chosen folder overrides a session cwd that is not a repository.
+const override = await callDir(tmpdir(), 'snapshot', { root: dir })
+assert.equal(override.ok, true)
+assert.ok(override.repo, 'root override selects the chosen repository')
+console.log('root override ok:', override.repo.root)
+
 const wt = await call('worktree')
 assert.equal(wt.data.ok, true)
 const files = wt.data.files

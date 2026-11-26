@@ -677,7 +677,25 @@ async function untrackedPatch(root, relative) {
  */
 async function resolveCheckout(ctx, query) {
   const sessionId = query.get('sessionId') || ''
+  const explicitRoot = query.get('root') || ''
   let cwd = ''
+
+  // A user-chosen repository folder wins over the session's own directory.
+  if (explicitRoot) {
+    let stat = null
+    try {
+      stat = await fs.stat(explicitRoot)
+    } catch {
+      stat = null
+    }
+    if (!stat || !stat.isDirectory()) {
+      const error = new Error(`Folder does not exist: ${explicitRoot}`)
+      error.statusCode = 404
+      throw error
+    }
+    const toplevel = await gitOrNull(explicitRoot, ['rev-parse', '--show-toplevel'])
+    return { root: toplevel ? toplevel.trim() || explicitRoot : null, cwd: explicitRoot }
+  }
 
   if (sessionId) {
     const agents = ctx.get('agents')

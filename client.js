@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.5.0'
+const PLUGIN_VERSION = '2.6.0'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -56,6 +56,10 @@ const DICT_ZH = {
   'mode.commits': '提交',
   'mode.turns': '最近改动',
   'action.refresh': '刷新',
+  'action.chooseRepo': '目录',
+  'action.apply': '应用',
+  'action.clear': '清除',
+  'label.repoPath': '仓库目录（绝对路径）',
   'action.back': '返回',
   'action.retry': '重试',
   'action.edit': '编辑',
@@ -125,6 +129,10 @@ const DICT_EN = {
   'mode.commits': 'Commits',
   'mode.turns': 'Recent changes',
   'action.refresh': 'Refresh',
+  'action.chooseRepo': 'Folder',
+  'action.apply': 'Apply',
+  'action.clear': 'Clear',
+  'label.repoPath': 'Repository folder (absolute path)',
   'action.back': 'Back',
   'action.retry': 'Retry',
   'action.edit': 'Edit',
@@ -258,6 +266,8 @@ const STYLE = `
 .crv-editbar{display:flex;align-items:center;gap:8px;padding:4px 8px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary);position:sticky;bottom:0;background:var(--dsw-alias-bg-base);z-index:2}
 .crv-dirtytext{color:var(--dsw-alias-state-warn-primary)}
 .crv-errortext{color:var(--dsw-alias-state-error-primary)}
+.crv-dirbar{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--dsw-alias-border-l1)}
+.crv-dirinput{flex:1;min-width:0;padding:3px 6px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}
 .crv-zoom{display:flex;align-items:center;gap:4px}
 .crv-zoomvalue{min-width:34px;text-align:center;font-variant-numeric:tabular-nums}
 .crv-fence{margin:8px 0}
@@ -1304,6 +1314,17 @@ window.__ModuleLoader__.load({
       scopeRef.current = scope
 
       const [mode, setMode] = useState('worktree')
+      const initialRepo = (() => {
+        try {
+          return (typeof localStorage !== 'undefined' && localStorage.getItem('dsh-code-review:root')) || ''
+        } catch {
+          return ''
+        }
+      })()
+      const [repoDir, setRepoDir] = useState(initialRepo)
+      const [dirOpen, setDirOpen] = useState(false)
+      const [dirDraft, setDirDraft] = useState(initialRepo)
+      const repoDirRef = useRef(initialRepo)
       const [snapshot, setSnapshot] = useState(null)
       const [snapshotError, setSnapshotError] = useState('')
       const [worktree, setWorktree] = useState(null)
@@ -1388,7 +1409,11 @@ window.__ModuleLoader__.load({
 
       const params = useCallback(() => {
         const current = scopeRef.current || {}
-        return { sessionId: current.sessionId || '', cwd: current.repoRoot || current.cwd || '' }
+        return {
+          sessionId: current.sessionId || '',
+          cwd: current.repoRoot || current.cwd || '',
+          root: repoDirRef.current || '',
+        }
       }, [])
 
       const loadSnapshot = useCallback(
@@ -1587,6 +1612,32 @@ window.__ModuleLoader__.load({
         setCommitError('')
         setSelectedPath(null)
       }
+
+      const applyRepo = useCallback(() => {
+        const value = dirDraft.trim()
+        repoDirRef.current = value
+        setRepoDir(value)
+        try {
+          if (value) localStorage.setItem('dsh-code-review:root', value)
+          else localStorage.removeItem('dsh-code-review:root')
+        } catch {
+          /* ignore */
+        }
+        setDirOpen(false)
+        refresh()
+      }, [dirDraft, refresh])
+
+      const clearRepo = useCallback(() => {
+        repoDirRef.current = ''
+        setRepoDir('')
+        setDirDraft('')
+        try {
+          localStorage.removeItem('dsh-code-review:root')
+        } catch {
+          /* ignore */
+        }
+        refresh()
+      }, [refresh])
 
       const toggleGroup = (groupPath) => {
         setCollapsedGroups((previous) => ({ ...previous, [groupPath]: !previous[groupPath] }))
@@ -2022,12 +2073,48 @@ window.__ModuleLoader__.load({
               ),
               h('span', { className: 'crv-grow' }),
               loading ? h('span', { className: 'crv-pulse' }) : null,
+              h(
+                'button',
+                {
+                  className: 'crv-btn',
+                  title: t('label.repoPath'),
+                  onClick: () => {
+                    setDirDraft(repoDir)
+                    setDirOpen((value) => !value)
+                  },
+                },
+                t('action.chooseRepo'),
+              ),
               h('button', { className: 'crv-btn', onClick: refresh, disabled: loading }, t('action.refresh')),
             ),
+            dirOpen
+              ? h(
+                  'div',
+                  { className: 'crv-dirbar' },
+                  h('input', {
+                    className: 'crv-dirinput',
+                    value: dirDraft,
+                    placeholder: t('label.repoPath'),
+                    spellCheck: false,
+                    onChange: (event) => setDirDraft(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') applyRepo()
+                      if (event.key === 'Escape') setDirOpen(false)
+                    },
+                  }),
+                  h('button', { className: 'crv-btn', onClick: applyRepo }, t('action.apply')),
+                  repoDir ? h('button', { className: 'crv-btn', onClick: clearRepo }, t('action.clear')) : null,
+                )
+              : null,
             h(
               'div',
               { className: 'crv-meta' },
               snapshot && snapshot.repo ? h('span', { className: 'crv-ellipsis', title: snapshot.repo.root }, snapshot.repo.name) : null,
+              !snapshot || !snapshot.repo
+                ? repoDir
+                  ? h('span', { className: 'crv-ellipsis', title: repoDir }, repoDir)
+                  : null
+                : null,
               snapshot && snapshot.repo && snapshot.repo.branch
                 ? h('span', { className: 'crv-branch', title: snapshot.repo.branch }, snapshot.repo.branch)
                 : snapshot && snapshot.repo && snapshot.repo.detached
@@ -2058,9 +2145,20 @@ window.__ModuleLoader__.load({
           title: t('state.noRepo'),
           hint: t('state.noRepoHint'),
           action: h(
-            'button',
-            { className: 'crv-btn', style: { marginTop: 6 }, onClick: () => setMode('turns') },
-            t('mode.turns'),
+            'div',
+            { style: { display: 'flex', gap: 6, marginTop: 6, justifyContent: 'center' } },
+            h(
+              'button',
+              {
+                className: 'crv-btn',
+                onClick: () => {
+                  setDirDraft(repoDir)
+                  setDirOpen(true)
+                },
+              },
+              t('action.chooseRepo'),
+            ),
+            h('button', { className: 'crv-btn', onClick: () => setMode('turns') }, t('mode.turns')),
           ),
         })
       } else if (mode === 'commits') body = renderCommitsList()

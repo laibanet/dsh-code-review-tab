@@ -22,6 +22,7 @@ in this conversation.
 - **右侧改动条**：左半绿色新增、右半红色删除，点击可跳转。
 - **就地编辑**：双击任意 diff 行（或点 **编辑**）直接在面板里改文件——新增行保持绿色、删除行以红色只读行内联显示原文，行号和改动条都在。`Ctrl+S` 保存（带文件被外部修改的冲突保护），`Ctrl+滚轮` 缩放字号，编辑框还可浮窗拖动/改大小或全屏。
 - **聊天代码块带来源**：如果代码块能推断出文件（diff 头、`path=` 元信息、或首行 `// 路径` 注释），上方会显示路径和 **打开** 按钮。
+- **手动选择仓库**：顶栏的 **目录** 按钮可输入任意 Git 仓库的绝对路径，未提交/提交视图改用该仓库；不清除则保持选择。会话 cwd 本身是仓库时无需设置。
 
 ### 环境要求
 
@@ -38,7 +39,7 @@ dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab
 ```
 
 或者在 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) 下载
-`dsh-code-review-tab-2.5.0.tgz`，用插件管理器安装。
+`dsh-code-review-tab-2.6.0.tgz`，用插件管理器安装。
 
 安装后硬刷新浏览器（`Ctrl+Shift+R`），输入框左侧会出现 **代码改动** 按钮。
 
@@ -100,6 +101,10 @@ MIT，见 [LICENSE](LICENSE)。
 - **Chat code blocks carry their source** — fences that name a file (diff
   headers, `path=` metadata, or a leading `// path` comment) get a header with
   the inferred path and an **打开 / Open** action.
+- **Pick a repository folder** — the top bar's **目录 / Folder** button accepts
+  any absolute Git repository path and switches the working-tree/commit views to
+  it; the choice is remembered until cleared. Leave it empty to follow the
+  session's own working directory.
 
 ### Requirements
 
@@ -119,7 +124,7 @@ From Git (works today):
 dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab.git
 ```
 
-Or download `dsh-code-review-tab-2.5.0.tgz` from
+Or download `dsh-code-review-tab-2.6.0.tgz` from
 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) and install
 it through the Plugin Manager.
 
