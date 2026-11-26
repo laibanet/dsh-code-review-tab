@@ -147,6 +147,12 @@ assert.deepEqual(td.hunks[0].lines.map(l => [l.kind, l.old, l.new, l.text]), [
 ])
 const turnsOther = await call('turns', { sessionId: 'other' })
 assert.equal(turnsOther.data.turns.length, 0)
+const turnsAll = await call('turns', { scope: 'all' })
+assert.equal(turnsAll.data.ok, true)
+assert.equal(turnsAll.data.turns.length, 1)
+assert.equal(turnsAll.data.turns[0].sessionId, 's1')
+assert.equal(turnsAll.data.turns[0].seq, 7)
+assert.equal(turnsAll.data.turns[0].cwd, 'C:/repo')
 console.log('turns ok:', JSON.stringify(turns.data.turns[0]))
 
 const bad = await call('commit', { hash: 'zzzz' })

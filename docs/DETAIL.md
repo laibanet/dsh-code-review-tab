@@ -6,8 +6,7 @@ A review panel that answers two questions without leaving the conversation:
 2. **What did the agent (or anyone) just change in my working tree?**
 
 It offers three views: **未提交** (the working tree against `HEAD`), **提交**
-(recent commits) and **本会话** (the per-turn changes the Host recorded for this
-conversation).
+(recent commits) and **最近改动** (the latest recorded turns, across sessions).
 
 ## Where it lives
 
@@ -23,19 +22,24 @@ When the host has no native right Sidebar (a build without `sidebarRight`), the
 button falls back to a fixed drawer rendered in `shell.overlay`; that drawer has
 its own close button.
 
-## This-session view
+## Recent-changes view
 
-The Host subscribes to the Session log's `workspace/changes` events and keeps,
-per Session, one entry per Turn that edited files. The view lists those entries
-newest first as **第 N 轮** headers with their file count and total `+`/`-`.
+The Host subscribes to every Session's `workspace/changes` events and keeps, per
+Session, one entry per Turn that edited files. The view merges those entries
+across Sessions and lists them newest first as **第 N 轮** headers with their
+file count and total `+`/`-`; a turn from another Session carries a small
+**会话 xxxxxx / Session xxxxxx** chip with that session's short id.
 
 Selecting a file asks the Host for that Turn's recorded comparison
-(`workspaceChanges.diff`) and renders it with the same diff renderer as the git
-views. The comparison is the file at turn start versus turn end, so it shows
-exactly what the agent changed in that Turn, independently of later commits.
+(`workspaceChanges.diff`, using the turn's own session id) and renders it with
+the same editor surface as the git views. The comparison is the file at turn
+start versus turn end, so it shows exactly what the agent changed in that Turn,
+independently of later commits. Editing uses the turn's recorded working
+directory as the resolution base.
 
-Recording starts when this plugin loads: Turns that ran before the Host started
-are not in the list. The working-tree and commit views still cover those files.
+Recording starts when this plugin loads, and the list is memory-only: Turns that
+ran before the Host started, or before a DSH restart, are not in the list. The
+working-tree and commit views still cover those files.
 
 ## Working tree view
 
@@ -133,7 +137,9 @@ The browser half never runs git. The Host half registers one read-only route
 - `snapshot` — branch, HEAD, recent commits, changed files, totals;
 - `commit&hash=` — one commit's metadata and parsed patch;
 - `worktree` — the working tree's parsed patch against `HEAD`;
-- `turns&sessionId=` — this Session's recorded per-turn summaries;
+- `turns&sessionId=` — one Session's recorded per-turn summaries;
+- `turns&scope=all` — every recorded turn across Sessions, newest first (each
+  entry carries its `sessionId` and `cwd`);
 - `turn&sessionId=&seq=&index=` — one recorded file comparison from one turn;
 - `file&path=&base=` — whether a path exists in the working tree and its
   absolute location for the editor handoff;

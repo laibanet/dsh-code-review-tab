@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.2.0'
+const PLUGIN_VERSION = '2.4.0'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -54,7 +54,7 @@ const DICT_ZH = {
   'tab.description': '逐行查看 Git 提交与未提交改动',
   'mode.worktree': '未提交',
   'mode.commits': '提交',
-  'mode.turns': '本会话',
+  'mode.turns': '最近改动',
   'action.refresh': '刷新',
   'action.back': '返回',
   'action.retry': '重试',
@@ -85,7 +85,7 @@ const DICT_ZH = {
   'state.emptyCommits': '没有提交记录',
   'state.commitsLimit': '只显示最近 {n} 个提交',
   'state.emptyTurns': '本会话还没有记录到改动',
-  'state.emptyTurnsHint': 'DSH 每改完一轮文件，这里会出现一条记录。',
+  'state.emptyTurnsHint': 'DSH 运行期间每改完一轮文件会出现一条记录；重启后旧轮次无法再读取。',
   'state.turnsUnavailable': '当前 Host 没有提供改动记录',
   'state.noRepo': '当前目录不是 Git 仓库',
   'state.noRepoHint': '打开一个 Git 仓库中的会话后再查看。',
@@ -111,6 +111,7 @@ const DICT_ZH = {
   'label.filesOne': '个文件',
   'label.turn': '第 {n} 轮',
   'label.turnFiles': '{n} 个文件',
+  'label.turnSession': '会话 {id}',
   'label.submoduleCommits': '{n} 个提交',
   'label.submoduleFiles': '{n} 个文件',
   'label.dirtySubmodule': '子模块内有未提交修改',
@@ -122,7 +123,7 @@ const DICT_EN = {
   'tab.description': 'Review line-level diffs of commits and uncommitted edits',
   'mode.worktree': 'Working tree',
   'mode.commits': 'Commits',
-  'mode.turns': 'This session',
+  'mode.turns': 'Recent changes',
   'action.refresh': 'Refresh',
   'action.back': 'Back',
   'action.retry': 'Retry',
@@ -153,7 +154,7 @@ const DICT_EN = {
   'state.emptyCommits': 'No commits yet',
   'state.commitsLimit': 'Showing the latest {n} commits',
   'state.emptyTurns': 'No recorded changes in this session yet',
-  'state.emptyTurnsHint': 'Each turn that edits files adds one entry here.',
+  'state.emptyTurnsHint': 'Each turn that edits files adds one entry while DSH is running; turns from before a restart cannot be read back.',
   'state.turnsUnavailable': 'Change recording is not available on this Host',
   'state.noRepo': 'This directory is not a git repository',
   'state.noRepoHint': 'Open a session whose working directory is inside a git repository.',
@@ -179,6 +180,7 @@ const DICT_EN = {
   'label.filesOne': 'file',
   'label.turn': 'Turn {n}',
   'label.turnFiles': '{n} files',
+  'label.turnSession': 'Session {id}',
   'label.submoduleCommits': '{n} commits',
   'label.submoduleFiles': '{n} files',
   'label.dirtySubmodule': 'Uncommitted changes inside this submodule',
@@ -209,6 +211,7 @@ const STYLE = `
 .crv-turn{border-bottom:1px solid var(--dsw-alias-border-l1)}
 .crv-turn:last-child{border-bottom:0}
 .crv-turnhead{display:flex;align-items:center;gap:6px;padding:5px 8px;font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2)}
+.crv-turn-session{font-size:10px;padding:0 5px;border-radius:4px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-secondary)}
 .crv-turnhead b{font-weight:600;color:var(--dsw-alias-label-primary);font-size:11.5px}
 .crv-turn .crv-item{padding-left:16px}
 .crv-grouphead{display:flex;align-items:center;gap:6px;padding:5px 8px;margin:2px 0;border-radius:6px;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent);cursor:pointer;font-size:11.5px;color:var(--dsw-alias-label-primary)}
@@ -1510,7 +1513,7 @@ window.__ModuleLoader__.load({
         const controller = new AbortController()
         setTurnDiff(null)
         setTurnDiffError('')
-        getJson('turn', { sessionId: scopeRef.current.sessionId || '', seq: turnFile.seq, index: turnFile.index }, controller.signal)
+        getJson('turn', { sessionId: turnFile.sessionId || scopeRef.current.sessionId || '', seq: turnFile.seq, index: turnFile.index }, controller.signal)
           .then((data) => {
             if (controller.signal.aborted) return
             setTurnDiff(data.diff || null)
@@ -1567,7 +1570,7 @@ window.__ModuleLoader__.load({
         await Promise.all([loadSnapshot(controller.signal), loadWorktree(controller.signal)])
         if (mode === 'turns') {
           try {
-            const data = await getJson('turns', { sessionId: scopeRef.current.sessionId || '' }, controller.signal)
+            const data = await getJson('turns', { scope: 'all' }, controller.signal)
             setTurns(data.turns || [])
             setTurnsUnavailable(Boolean(data.unavailable))
             setTurnsError('')
@@ -1931,6 +1934,9 @@ window.__ModuleLoader__.load({
                   'div',
                   { className: 'crv-turnhead' },
                   h('b', null, t('label.turn').replace('{n}', String(turn.turn))),
+                  turn.sessionId && turn.sessionId !== scopeRef.current.sessionId
+                    ? h('span', { className: 'crv-turn-session', title: turn.sessionId }, t('label.turnSession').replace('{id}', String(turn.sessionId).slice(-6)))
+                    : null,
                   h('span', { className: 'crv-grow' }),
                   h('span', null, t('label.turnFiles').replace('{n}', String(turn.total))),
                   h('span', { className: 'crv-plus' }, `+${formatCount(turn.added)}`),
@@ -1938,16 +1944,29 @@ window.__ModuleLoader__.load({
                 ),
                 (turn.files || []).map((file) =>
                   h(TurnFileRow, {
-                    key: `${turn.seq}-${file.index}`,
+                    key: `${turn.sessionId || ''}-${turn.seq}-${file.index}`,
                     file,
-                    active: Boolean(turnFile && turnFile.seq === turn.seq && turnFile.index === file.index),
-                    onSelect: () => setTurnFile({ seq: turn.seq, index: file.index, path: file.path }),
+                    active: Boolean(
+                      turnFile &&
+                        turnFile.seq === turn.seq &&
+                        turnFile.index === file.index &&
+                        (turnFile.sessionId || '') === (turn.sessionId || ''),
+                    ),
+                    onSelect: () =>
+                      setTurnFile({
+                        seq: turn.seq,
+                        index: file.index,
+                        path: file.path,
+                        sessionId: turn.sessionId,
+                        cwd: turn.cwd,
+                        turn: turn.turn,
+                      }),
                   }),
                 ),
               ),
             ),
           ),
-          renderEditor(turnDiff, scopeRef.current.cwd || '', {
+          renderEditor(turnDiff, (turnFile && turnFile.cwd) || scopeRef.current.cwd || '', {
             header,
             empty: h(Empty, { title: turnFile ? t('state.loading') : t('state.selectFile') }),
           }),

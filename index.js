@@ -1100,24 +1100,78 @@ function normalizeWorkspaceDiff(diff) {
  * @param {{turns: Map<string, {seq: number, turn?: number}[]>}} state plugin state.
  * @returns {Promise<object>} the turns payload.
  */
+/**
+ * Recover the turns a live Session recorded before this plugin loaded.
+ * @param {object} ctx plugin context.
+ * @param {{turns: Map, seeded: Set<string>, nextOrder: number}} state plugin state.
+ */
+function seedRecordedTurns(ctx, state) {
+  try {
+    const sessions = ctx.get('sessions')
+    if (!sessions || typeof sessions.list !== 'function') return
+    let order = state.nextOrder
+    for (const session of sessions.list()) {
+      if (!session || !session.id || state.seeded.has(session.id)) continue
+      state.seeded.add(session.id)
+      let events = []
+      try {
+        events = typeof session.snapshotEvents === 'function' ? session.snapshotEvents() : []
+      } catch {
+        events = []
+      }
+      const entries = []
+      for (const event of events) {
+        if (!event || event.type !== 'workspace/changes') continue
+        const data = event.data || {}
+        entries.push({
+          seq: event.seq,
+          turn: Number.isSafeInteger(data.turn) ? data.turn : undefined,
+          at: typeof event.time === 'number' ? event.time : 0,
+          order: (order += 1),
+        })
+      }
+      if (entries.length === 0) continue
+      entries.reverse()
+      if (entries.length > MAX_TURNS) entries.length = MAX_TURNS
+      state.turns.set(session.id, entries)
+    }
+    state.nextOrder = order
+  } catch {
+    /* seeding is best effort */
+  }
+}
+
 async function turnsList(ctx, query, state) {
-  const sessionId = query.get('sessionId') || ''
-  if (!sessionId) return { ok: true, turns: [], unavailable: false }
+  seedRecordedTurns(ctx, state)
   const service = ctx.get('workspaceChanges')
   if (!service) return { ok: true, turns: [], unavailable: true }
+  const scopeAll = query.get('scope') === 'all'
+  const sessionId = query.get('sessionId') || ''
+  const pairs = []
+  if (scopeAll) {
+    for (const [id, list] of state.turns) {
+      for (const entry of list) pairs.push({ sessionId: id, entry })
+    }
+  } else {
+    if (!sessionId) return { ok: true, turns: [], unavailable: false }
+    for (const entry of state.turns.get(sessionId) || []) pairs.push({ sessionId, entry })
+  }
 
-  const stored = state.turns.get(sessionId) || []
   const turns = []
-  for (const entry of stored) {
+  for (const pair of pairs) {
     let summary
     try {
-      summary = service.summary(sessionId, entry.seq)
+      summary = service.summary(pair.sessionId, pair.entry.seq)
     } catch {
       summary = undefined
     }
     if (!summary) continue
     turns.push({
-      seq: entry.seq,
+      sessionId: pair.sessionId,
+      order: pair.entry.order || 0,
+      at: pair.entry.at || 0,
+      cwd: summary.cwd || '',
+      seq: pair.entry.seq,
       turn: summary.turn,
       total: summary.total,
       added: summary.added,
@@ -1133,7 +1187,10 @@ async function turnsList(ctx, query, state) {
       })),
     })
   }
-  return { ok: true, turns, unavailable: false }
+  if (scopeAll) {
+    turns.sort((left, right) => (right.at || 0) - (left.at || 0) || (right.order || 0) - (left.order || 0))
+  }
+  return { ok: true, turns: turns.slice(0, MAX_TURNS), unavailable: false }
 }
 
 /**
@@ -1230,7 +1287,7 @@ async function handle(ctx, state, request, response) {
  * @param {object} ctx plugin context.
  */
 export function apply(ctx) {
-  const state = { turns: new Map() }
+  const state = { turns: new Map(), seeded: new Set(), nextOrder: 0 }
 
   ctx.effect(
     () =>
@@ -1243,7 +1300,8 @@ export function apply(ctx) {
         const turn = Number.isSafeInteger(data.turn) ? data.turn : undefined
         const list = state.turns.get(sessionId) || []
         if (list.some((entry) => entry.seq === seq)) return
-        list.unshift({ seq, turn })
+        const at = typeof event.time === 'number' ? event.time : Date.now()
+        list.unshift({ seq, turn, at, order: (state.nextOrder += 1) })
         if (list.length > MAX_TURNS) list.length = MAX_TURNS
         state.turns.set(sessionId, list)
         if (state.turns.size > 64) {
@@ -1253,6 +1311,12 @@ export function apply(ctx) {
       }),
     'code-review: per-turn change feed',
   )
+
+  // Recover the turns a live Session recorded before this plugin loaded (a
+  // reload or a fresh install must not empty the recent-changes view).
+  ctx.effect(() => {
+    seedRecordedTurns(ctx, state)
+  }, 'code-review: seed recorded turns from live sessions')
 
   ctx.effect(
     () =>
