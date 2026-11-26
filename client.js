@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.6.0'
+const PLUGIN_VERSION = '2.6.1'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -462,6 +462,40 @@ function inferFenceSource(lang, meta, code) {
     if (bare) candidates.push(bare[1])
   }
   return candidates.find((value) => looksLikeFilePath(value)) || ''
+}
+
+/** Per-Session chosen repository folder (empty = follow the session cwd). */
+function readStoredRepo(sessionId) {
+  try {
+    const value = localStorage.getItem(`dsh-code-review:root:${sessionId || ''}`)
+    return typeof value === 'string' ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+function writeStoredRepo(sessionId, value) {
+  try {
+    const key = `dsh-code-review:root:${sessionId || ''}`
+    if (value) localStorage.setItem(key, value)
+    else localStorage.removeItem(key)
+  } catch {
+    /* storage may be unavailable */
+  }
+}
+
+/** Adopt the pre-2.6.1 global choice once, then drop it. */
+function takeLegacyRepo() {
+  try {
+    const value = localStorage.getItem('dsh-code-review:root')
+    if (value) {
+      localStorage.removeItem('dsh-code-review:root')
+      return value
+    }
+  } catch {
+    /* ignore */
+  }
+  return ''
 }
 
 function splitPath(value) {
@@ -1314,17 +1348,10 @@ window.__ModuleLoader__.load({
       scopeRef.current = scope
 
       const [mode, setMode] = useState('worktree')
-      const initialRepo = (() => {
-        try {
-          return (typeof localStorage !== 'undefined' && localStorage.getItem('dsh-code-review:root')) || ''
-        } catch {
-          return ''
-        }
-      })()
-      const [repoDir, setRepoDir] = useState(initialRepo)
+      const [repoDir, setRepoDir] = useState('')
       const [dirOpen, setDirOpen] = useState(false)
-      const [dirDraft, setDirDraft] = useState(initialRepo)
-      const repoDirRef = useRef(initialRepo)
+      const [dirDraft, setDirDraft] = useState('')
+      const repoDirRef = useRef('')
       const [snapshot, setSnapshot] = useState(null)
       const [snapshotError, setSnapshotError] = useState('')
       const [worktree, setWorktree] = useState(null)
@@ -1377,6 +1404,25 @@ window.__ModuleLoader__.load({
       useEffect(() => () => {
         if (noticeTimer.current) clearTimeout(noticeTimer.current)
       }, [])
+
+      // A folder choice belongs to one Session: switching sessions falls back
+      // to that session's own working directory.
+      useEffect(() => {
+        const sessionId = scopeRef.current.sessionId || ''
+        let value = readStoredRepo(sessionId)
+        if (!value) {
+          const legacy = takeLegacyRepo()
+          if (legacy) {
+            value = legacy
+            writeStoredRepo(sessionId, legacy)
+          }
+        }
+        repoDirRef.current = value
+        setRepoDir(value)
+        setDirDraft(value)
+        setDirOpen(false)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [scopeKey])
 
       useEffect(() => {
         setExpandedPath(null)
@@ -1615,27 +1661,20 @@ window.__ModuleLoader__.load({
 
       const applyRepo = useCallback(() => {
         const value = dirDraft.trim()
+        const sessionId = scopeRef.current.sessionId || ''
         repoDirRef.current = value
         setRepoDir(value)
-        try {
-          if (value) localStorage.setItem('dsh-code-review:root', value)
-          else localStorage.removeItem('dsh-code-review:root')
-        } catch {
-          /* ignore */
-        }
+        writeStoredRepo(sessionId, value)
         setDirOpen(false)
         refresh()
       }, [dirDraft, refresh])
 
       const clearRepo = useCallback(() => {
+        const sessionId = scopeRef.current.sessionId || ''
         repoDirRef.current = ''
         setRepoDir('')
         setDirDraft('')
-        try {
-          localStorage.removeItem('dsh-code-review:root')
-        } catch {
-          /* ignore */
-        }
+        writeStoredRepo(sessionId, '')
         refresh()
       }, [refresh])
 
