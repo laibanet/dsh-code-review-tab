@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.6.2'
+const PLUGIN_VERSION = '2.7.0'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -56,6 +56,7 @@ const DICT_ZH = {
   'mode.commits': '提交',
   'mode.turns': '最近改动',
   'action.refresh': '刷新',
+  'action.loadMore': '加载更多',
   'action.chooseRepo': '目录',
   'action.apply': '应用',
   'action.clear': '清除',
@@ -129,6 +130,7 @@ const DICT_EN = {
   'mode.commits': 'Commits',
   'mode.turns': 'Recent changes',
   'action.refresh': 'Refresh',
+  'action.loadMore': 'Load more',
   'action.chooseRepo': 'Folder',
   'action.apply': 'Apply',
   'action.clear': 'Clear',
@@ -266,6 +268,9 @@ const STYLE = `
 .crv-editbar{display:flex;align-items:center;gap:8px;padding:4px 8px;border-top:1px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-secondary);position:sticky;bottom:0;background:var(--dsw-alias-bg-base);z-index:2}
 .crv-dirtytext{color:var(--dsw-alias-state-warn-primary)}
 .crv-errortext{color:var(--dsw-alias-state-error-primary)}
+.crv-more{margin:8px;padding:6px 10px;border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-size:11px;cursor:pointer}
+.crv-more:disabled{opacity:.6;cursor:default}
+.crv-more:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}
 .crv-dirbar{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .crv-dirinput{flex:1;min-width:0;padding:3px 6px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px}
 .crv-zoom{display:flex;align-items:center;gap:4px}
@@ -1338,6 +1343,8 @@ window.__ModuleLoader__.load({
       const [dirOpen, setDirOpen] = useState(false)
       const [dirDraft, setDirDraft] = useState('')
       const repoDirRef = useRef('')
+      const [commitLimit, setCommitLimit] = useState(20)
+      const commitLimitRef = useRef(20)
       const [snapshot, setSnapshot] = useState(null)
       const [snapshotError, setSnapshotError] = useState('')
       const [worktree, setWorktree] = useState(null)
@@ -1421,6 +1428,8 @@ window.__ModuleLoader__.load({
       }, [scopeKey])
 
       useEffect(() => {
+        commitLimitRef.current = 20
+        setCommitLimit(20)
         setExpandedPath(null)
         setExpandTarget(1)
         setFullFile(null)
@@ -1461,7 +1470,7 @@ window.__ModuleLoader__.load({
       const loadSnapshot = useCallback(
         async (signal) => {
           try {
-            const data = await getJson('snapshot', params(), signal)
+            const data = await getJson('snapshot', { ...params(), limit: commitLimitRef.current }, signal)
             if (signal && signal.aborted) return
             setSnapshot(data)
             setSnapshotError('')
@@ -1660,6 +1669,8 @@ window.__ModuleLoader__.load({
         const sessionId = scopeRef.current.sessionId || ''
         repoDirRef.current = value
         setRepoDir(value)
+        commitLimitRef.current = 20
+        setCommitLimit(20)
         writeStoredRepo(sessionId, value)
         postJson('repo', { sessionId }, { root: value }).catch(() => {})
         setDirOpen(false)
@@ -1671,8 +1682,17 @@ window.__ModuleLoader__.load({
         repoDirRef.current = ''
         setRepoDir('')
         setDirDraft('')
+        commitLimitRef.current = 20
+        setCommitLimit(20)
         writeStoredRepo(sessionId, '')
         postJson('repo', { sessionId }, { root: '' }).catch(() => {})
+        refresh()
+      }, [refresh])
+
+      const loadMoreCommits = useCallback(() => {
+        const next = Math.min(200, commitLimitRef.current + 20)
+        commitLimitRef.current = next
+        setCommitLimit(next)
         refresh()
       }, [refresh])
 
@@ -1958,7 +1978,9 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'crv-list crv-flat' },
           commits.map((commit) => h(CommitRow, { key: commit.hash, commit, onSelect: setSelectedCommit })),
-          commits.length >= 40 ? h('div', { className: 'crv-note' }, t('state.commitsLimit').replace('{n}', String(commits.length))) : null,
+          snapshot.hasMore
+            ? h('button', { className: 'crv-more', onClick: loadMoreCommits, disabled: loading }, t('action.loadMore'))
+            : null,
         )
       }
 

@@ -28,7 +28,8 @@ const MAX_CONTENT_BYTES = 1024 * 1024
 const MAX_CONTENT_LINES = 8000
 const MAX_TURNS = 300
 const GIT_TIMEOUT = 20000
-const COMMIT_COUNT = 40
+const COMMIT_PAGE = 20
+const COMMIT_MAX = 200
 
 /** Where recorded turns are persisted so a restart keeps them. */
 const HISTORY_DIR =
@@ -834,10 +835,12 @@ async function snapshot(ctx, query) {
   }
 
   const base = await diffBase(root)
+  const requested = Number(query.get('limit'))
+  const limit = Number.isSafeInteger(requested) && requested > 0 ? Math.min(COMMIT_MAX, requested) : COMMIT_PAGE
   const [branchOut, headOut, logOut, statusOut, numstatOut] = await Promise.all([
     gitOrNull(root, ['rev-parse', '--abbrev-ref', 'HEAD']),
     gitOrNull(root, ['log', '-1', '--format=%H%x1f%h%x1f%an%x1f%ai%x1f%s']),
-    gitOrNull(root, ['log', '-n', String(COMMIT_COUNT), '--format=%H%x1f%h%x1f%an%x1f%ai%x1f%D%x1f%s']),
+    gitOrNull(root, ['log', '-n', String(limit), '--format=%H%x1f%h%x1f%an%x1f%ai%x1f%D%x1f%s']),
     gitOrNull(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']),
     gitOrNull(root, ['diff', base, '--numstat', '-z', '--no-color']),
   ])
@@ -939,6 +942,8 @@ async function snapshot(ctx, query) {
       head,
     },
     commits,
+    commitsLimit: limit,
+    hasMore: commits.length >= limit,
     changes,
     counts: {
       files: entries.length,

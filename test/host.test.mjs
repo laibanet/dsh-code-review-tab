@@ -102,6 +102,12 @@ assert.equal(override.ok, true)
 assert.ok(override.repo, 'root override selects the chosen repository')
 console.log('root override ok:', override.repo.root)
 
+// The commit list is paged: the default page is 20 and a caller can ask for more.
+const page = await call('snapshot', { limit: 1 })
+assert.equal(page.data.commits.length, 1)
+assert.equal(page.data.hasMore, true)
+console.log('commit pagination ok')
+
 // The chosen folder is stored on the Host, per Session, so a restart keeps it.
 const choice0 = await callDir(tmpdir(), 'repo', { sessionId: 's1' })
 assert.equal(choice0.ok, true)
