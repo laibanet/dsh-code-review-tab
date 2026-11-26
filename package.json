@@ -1,6 +1,6 @@
 {
   "name": "dsh-code-review-tab",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": false,
   "description": "Right-sidebar code review tab: line-level diffs of git commits and of the working tree DSH just edited.",
   "type": "module",

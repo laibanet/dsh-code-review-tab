@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.4.0'
+const PLUGIN_VERSION = '2.5.0'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -85,7 +85,7 @@ const DICT_ZH = {
   'state.emptyCommits': '没有提交记录',
   'state.commitsLimit': '只显示最近 {n} 个提交',
   'state.emptyTurns': '本会话还没有记录到改动',
-  'state.emptyTurnsHint': 'DSH 运行期间每改完一轮文件会出现一条记录；重启后旧轮次无法再读取。',
+  'state.emptyTurnsHint': '每改完一轮会自动记录并保存；此版本之前的历史轮次无法补录。',
   'state.turnsUnavailable': '当前 Host 没有提供改动记录',
   'state.noRepo': '当前目录不是 Git 仓库',
   'state.noRepoHint': '打开一个 Git 仓库中的会话后再查看。',
@@ -154,7 +154,7 @@ const DICT_EN = {
   'state.emptyCommits': 'No commits yet',
   'state.commitsLimit': 'Showing the latest {n} commits',
   'state.emptyTurns': 'No recorded changes in this session yet',
-  'state.emptyTurnsHint': 'Each turn that edits files adds one entry while DSH is running; turns from before a restart cannot be read back.',
+  'state.emptyTurnsHint': 'Each turn is recorded and saved automatically; turns from before this version cannot be recovered.',
   'state.turnsUnavailable': 'Change recording is not available on this Host',
   'state.noRepo': 'This directory is not a git repository',
   'state.noRepoHint': 'Open a session whose working directory is inside a git repository.',

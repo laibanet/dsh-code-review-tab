@@ -1,8 +1,12 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert/strict'
+
+// Keep the persisted-turn files out of the real DSH home.
+const historyDir = mkdtempSync(path.join(tmpdir(), 'crv-history-'))
+process.env.DSH_CODE_REVIEW_HISTORY_DIR = historyDir
 
 const { apply } = await import(new URL('../index.js', import.meta.url).href)
 
@@ -153,6 +157,12 @@ assert.equal(turnsAll.data.turns.length, 1)
 assert.equal(turnsAll.data.turns[0].sessionId, 's1')
 assert.equal(turnsAll.data.turns[0].seq, 7)
 assert.equal(turnsAll.data.turns[0].cwd, 'C:/repo')
+await new Promise((resolve) => setTimeout(resolve, 900))
+assert.ok(
+  readdirSync(historyDir).some((file) => file.endsWith('.json')),
+  'the recorded turn is persisted for the next process',
+)
+rmSync(historyDir, { recursive: true, force: true })
 console.log('turns ok:', JSON.stringify(turns.data.turns[0]))
 
 const bad = await call('commit', { hash: 'zzzz' })

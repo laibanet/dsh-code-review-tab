@@ -17,7 +17,7 @@ in this conversation.
 - **原生右侧栏标签页**：从输入框的 **代码改动** 按钮打开，右侧栏会占一列、让对话区自动变窄，而不是盖住界面。
 - **未提交**：相对 `HEAD` 的所有未提交改动，也就是 Agent 改完还没提交的状态。
 - **提交**：最近 40 个提交，含改动文件与完整 patch。
-- **最近改动**：按时间倒序的最近几轮改动，**跨会话**（本会话在前，历史会话依次往下，非当前会话会标注会话 id），来自各 Session 的 `workspace/changes` 事件。
+- **最近改动**：按时间倒序的最近几轮改动，**跨会话**（非当前会话会标注会话 id），来自各 Session 的 `workspace/changes` 事件；每轮会自动**落盘**到 `~/.dsh/code-review-history/`，重启后仍可查看（每会话保留最近 40 轮）。
 - **子模块自动展开**：只 bump 了 `src/navigation` 的提交，会展开成子模块自己的提交和真实文件 diff，而不是两行 `Subproject commit` 指针。
 - **右侧改动条**：左半绿色新增、右半红色删除，点击可跳转。
 - **就地编辑**：双击任意 diff 行（或点 **编辑**）直接在面板里改文件——新增行保持绿色、删除行以红色只读行内联显示原文，行号和改动条都在。`Ctrl+S` 保存（带文件被外部修改的冲突保护），`Ctrl+滚轮` 缩放字号，编辑框还可浮窗拖动/改大小或全屏。
@@ -38,7 +38,7 @@ dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab
 ```
 
 或者在 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) 下载
-`dsh-code-review-tab-2.4.0.tgz`，用插件管理器安装。
+`dsh-code-review-tab-2.5.0.tgz`，用插件管理器安装。
 
 安装后硬刷新浏览器（`Ctrl+Shift+R`），输入框左侧会出现 **代码改动** 按钮。
 
@@ -84,8 +84,9 @@ MIT，见 [LICENSE](LICENSE)。
 - **Commits** — the 40 most recent commits, each with its changed files and full
   patch.
 - **Recent changes** — the latest recorded turns in reverse order, **across
-  sessions**: the current session first, then older sessions (their short id is
-  shown), read from each Session's `workspace/changes` events.
+  sessions** (another session's short id is shown). Each turn is persisted to
+  `~/.dsh/code-review-history/`, so the list survives a restart (last 40 turns
+  per session).
 - **Submodules are expanded** — a commit that only bumps `src/navigation` is
   shown as that submodule's own commits plus its real file/line diff, not as a
   two-line `Subproject commit` pointer.
@@ -118,7 +119,7 @@ From Git (works today):
 dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab.git
 ```
 
-Or download `dsh-code-review-tab-2.4.0.tgz` from
+Or download `dsh-code-review-tab-2.5.0.tgz` from
 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) and install
 it through the Plugin Manager.
 

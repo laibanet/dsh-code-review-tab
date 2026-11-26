@@ -12,6 +12,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
+import { homedir } from 'node:os'
 import path from 'node:path'
 
 export const name = 'code-review'
@@ -28,6 +29,122 @@ const MAX_CONTENT_LINES = 8000
 const MAX_TURNS = 300
 const GIT_TIMEOUT = 20000
 const COMMIT_COUNT = 40
+
+/** Where recorded turns are persisted so a restart keeps them. */
+const HISTORY_DIR =
+  process.env.DSH_CODE_REVIEW_HISTORY_DIR ||
+  path.join(process.env.DSH_HOME || path.join(homedir(), '.dsh'), 'code-review-history')
+const HISTORY_MAX_TURNS = 40
+const HISTORY_MAX_FILES = 60
+const HISTORY_MAX_BYTES = 6 * 1024 * 1024
+
+/** One persisted session file. */
+function historyFilePath(sessionId) {
+  return path.join(HISTORY_DIR, `${encodeURIComponent(sessionId)}.json`)
+}
+
+/** Read one session's persisted turns. */
+async function readHistoryFile(sessionId) {
+  try {
+    const text = await fs.readFile(historyFilePath(sessionId), 'utf8')
+    const data = JSON.parse(text)
+    return Array.isArray(data.turns) ? data.turns : []
+  } catch {
+    return []
+  }
+}
+
+/** Write one session's persisted turns, keeping the file bounded. */
+async function writeHistoryFile(sessionId, cwd, turns) {
+  try {
+    await fs.mkdir(HISTORY_DIR, { recursive: true })
+    let kept = turns.slice(0, HISTORY_MAX_TURNS)
+    let text = JSON.stringify({ sessionId, cwd: cwd || '', turns: kept })
+    while (text.length > HISTORY_MAX_BYTES && kept.length > 1) {
+      kept = kept.slice(0, kept.length - 1)
+      text = JSON.stringify({ sessionId, cwd: cwd || '', turns: kept })
+    }
+    const file = historyFilePath(sessionId)
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`
+    await fs.writeFile(temp, text, 'utf8')
+    await fs.rename(temp, file)
+  } catch {
+    /* persistence is best effort */
+  }
+}
+
+/** Load every persisted session into `state.history` once. */
+async function loadHistory(state) {
+  if (state.historyLoaded) return
+  state.historyLoaded = true
+  try {
+    const names = await fs.readdir(HISTORY_DIR)
+    for (const entry of names) {
+      if (!entry.endsWith('.json')) continue
+      try {
+        const text = await fs.readFile(path.join(HISTORY_DIR, entry), 'utf8')
+        const data = JSON.parse(text)
+        if (!data || typeof data.sessionId !== 'string' || !Array.isArray(data.turns)) continue
+        state.history.set(data.sessionId, { cwd: data.cwd || '', turns: data.turns })
+      } catch {
+        /* skip a broken file */
+      }
+    }
+  } catch {
+    /* no history yet */
+  }
+}
+
+/** Persist one recorded turn after its summary and comparisons settle. */
+async function persistTurn(ctx, state, sessionId, seq) {
+  const service = ctx.get('workspaceChanges')
+  if (!service) return
+  let summary
+  for (let attempt = 0; attempt < 5 && !summary; attempt += 1) {
+    try {
+      summary = service.summary(sessionId, seq)
+    } catch {
+      summary = undefined
+    }
+    if (!summary) await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  if (!summary) return
+
+  const diffs = {}
+  const files = summary.files || []
+  for (let index = 0; index < Math.min(files.length, HISTORY_MAX_FILES); index += 1) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 15000)
+      const diff = await service.diff(sessionId, seq, index, controller.signal)
+      clearTimeout(timer)
+      if (diff) diffs[index] = normalizeWorkspaceDiff(diff)
+    } catch {
+      /* skip one unreadable file */
+    }
+  }
+
+  const record = state.history.get(sessionId) || { cwd: summary.cwd || '', turns: [] }
+  if (record.turns.some((turn) => turn.seq === seq)) return
+  record.cwd = summary.cwd || record.cwd || ''
+  record.turns.unshift({
+    seq,
+    turn: summary.turn,
+    at: Date.now(),
+    summary: {
+      turn: summary.turn,
+      cwd: summary.cwd || '',
+      files: files,
+      total: summary.total,
+      added: summary.added,
+      deleted: summary.deleted,
+    },
+    diffs,
+  })
+  record.turns = record.turns.slice(0, HISTORY_MAX_TURNS)
+  state.history.set(sessionId, record)
+  await writeHistoryFile(sessionId, record.cwd, record.turns)
+}
 
 /**
  * Run one git command without a shell.
@@ -1142,55 +1259,81 @@ function seedRecordedTurns(ctx, state) {
 }
 
 async function turnsList(ctx, query, state) {
+  await loadHistory(state)
   seedRecordedTurns(ctx, state)
   const service = ctx.get('workspaceChanges')
-  if (!service) return { ok: true, turns: [], unavailable: true }
   const scopeAll = query.get('scope') === 'all'
   const sessionId = query.get('sessionId') || ''
-  const pairs = []
-  if (scopeAll) {
-    for (const [id, list] of state.turns) {
-      for (const entry of list) pairs.push({ sessionId: id, entry })
+  const byKey = new Map()
+  const add = (id, turn) => {
+    const key = `${id}:${turn.seq}`
+    if (!byKey.has(key)) byKey.set(key, turn)
+  }
+  const mapFiles = (files) =>
+    (files || []).map((file, index) => ({
+      index,
+      path: file.path,
+      display: file.display || file.path,
+      added: file.added || 0,
+      deleted: file.deleted || 0,
+      binary: Boolean(file.binary),
+      oversized: Boolean(file.oversized),
+    }))
+
+  if (service) {
+    const pairs = []
+    if (scopeAll) {
+      for (const [id, list] of state.turns) {
+        for (const entry of list) pairs.push({ sessionId: id, entry })
+      }
+    } else if (sessionId) {
+      for (const entry of state.turns.get(sessionId) || []) pairs.push({ sessionId, entry })
     }
-  } else {
-    if (!sessionId) return { ok: true, turns: [], unavailable: false }
-    for (const entry of state.turns.get(sessionId) || []) pairs.push({ sessionId, entry })
+    for (const pair of pairs) {
+      let summary
+      try {
+        summary = service.summary(pair.sessionId, pair.entry.seq)
+      } catch {
+        summary = undefined
+      }
+      if (!summary) continue
+      add(pair.sessionId, {
+        sessionId: pair.sessionId,
+        order: pair.entry.order || 0,
+        at: pair.entry.at || 0,
+        cwd: summary.cwd || '',
+        seq: pair.entry.seq,
+        turn: summary.turn,
+        total: summary.total,
+        added: summary.added,
+        deleted: summary.deleted,
+        files: mapFiles(summary.files),
+      })
+    }
   }
 
-  const turns = []
-  for (const pair of pairs) {
-    let summary
-    try {
-      summary = service.summary(pair.sessionId, pair.entry.seq)
-    } catch {
-      summary = undefined
+  for (const [id, record] of state.history) {
+    if (!scopeAll && id !== sessionId) continue
+    for (const turn of record.turns || []) {
+      const summary = turn.summary || {}
+      add(id, {
+        sessionId: id,
+        order: 0,
+        at: turn.at || 0,
+        cwd: summary.cwd || record.cwd || '',
+        seq: turn.seq,
+        turn: summary.turn ?? turn.turn,
+        total: summary.total || 0,
+        added: summary.added || 0,
+        deleted: summary.deleted || 0,
+        files: mapFiles(summary.files),
+      })
     }
-    if (!summary) continue
-    turns.push({
-      sessionId: pair.sessionId,
-      order: pair.entry.order || 0,
-      at: pair.entry.at || 0,
-      cwd: summary.cwd || '',
-      seq: pair.entry.seq,
-      turn: summary.turn,
-      total: summary.total,
-      added: summary.added,
-      deleted: summary.deleted,
-      files: (summary.files || []).map((file, index) => ({
-        index,
-        path: file.path,
-        display: file.display || file.path,
-        added: file.added || 0,
-        deleted: file.deleted || 0,
-        binary: Boolean(file.binary),
-        oversized: Boolean(file.oversized),
-      })),
-    })
   }
-  if (scopeAll) {
-    turns.sort((left, right) => (right.at || 0) - (left.at || 0) || (right.order || 0) - (left.order || 0))
-  }
-  return { ok: true, turns: turns.slice(0, MAX_TURNS), unavailable: false }
+
+  const turns = [...byKey.values()]
+  turns.sort((left, right) => (right.at || 0) - (left.at || 0) || (right.order || 0) - (left.order || 0))
+  return { ok: true, turns: turns.slice(0, MAX_TURNS), unavailable: !service && state.history.size === 0 }
 }
 
 /**
@@ -1199,7 +1342,7 @@ async function turnsList(ctx, query, state) {
  * @param {URLSearchParams} query request parameters.
  * @returns {Promise<object>} the comparison payload.
  */
-async function turnDiff(ctx, query) {
+async function turnDiff(ctx, query, state) {
   const sessionId = query.get('sessionId') || ''
   const seq = Number(query.get('seq'))
   const index = Number(query.get('index'))
@@ -1207,19 +1350,25 @@ async function turnDiff(ctx, query) {
     return { ok: false, error: 'Invalid turn coordinates.' }
   }
   const service = ctx.get('workspaceChanges')
-  if (!service) return { ok: false, error: 'Workspace change recording is unavailable in this Host.' }
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
-  try {
-    const diff = await service.diff(sessionId, seq, index, controller.signal)
-    if (!diff) return { ok: false, error: 'This recorded change is no longer available.' }
-    return { ok: true, diff: normalizeWorkspaceDiff(diff) }
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
-  } finally {
-    clearTimeout(timer)
+  let live = null
+  if (service) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000)
+    try {
+      live = await service.diff(sessionId, seq, index, controller.signal)
+    } catch {
+      live = null
+    } finally {
+      clearTimeout(timer)
+    }
   }
+  if (live) return { ok: true, diff: normalizeWorkspaceDiff(live) }
+
+  await loadHistory(state)
+  const record = state.history.get(sessionId)
+  const stored = record && record.turns.find((turn) => turn.seq === seq)
+  if (stored && stored.diffs && stored.diffs[index]) return { ok: true, diff: stored.diffs[index] }
+  return { ok: false, error: 'This recorded change is no longer available.' }
 }
 
 /**
@@ -1271,7 +1420,7 @@ async function handle(ctx, state, request, response) {
     else if (action === 'commit') payload = await commitDetail(ctx, url.searchParams)
     else if (action === 'worktree') payload = await worktreeDetail(ctx, url.searchParams)
     else if (action === 'turns') payload = await turnsList(ctx, url.searchParams, state)
-    else if (action === 'turn') payload = await turnDiff(ctx, url.searchParams)
+    else if (action === 'turn') payload = await turnDiff(ctx, url.searchParams, state)
     else if (action === 'file') payload = await fileInfo(ctx, url.searchParams)
     else if (action === 'content') payload = await fileContent(ctx, url.searchParams)
     else payload = { ok: false, error: `Unknown action: ${action || '(none)'}` }
@@ -1287,7 +1436,7 @@ async function handle(ctx, state, request, response) {
  * @param {object} ctx plugin context.
  */
 export function apply(ctx) {
-  const state = { turns: new Map(), seeded: new Set(), nextOrder: 0 }
+  const state = { turns: new Map(), seeded: new Set(), history: new Map(), historyLoaded: false, nextOrder: 0 }
 
   ctx.effect(
     () =>
@@ -1308,6 +1457,10 @@ export function apply(ctx) {
           const oldest = state.turns.keys().next().value
           if (oldest !== sessionId) state.turns.delete(oldest)
         }
+        // Persist after the recorder has stored the summary for this seq.
+        setTimeout(() => {
+          persistTurn(ctx, state, sessionId, seq).catch(() => {})
+        }, 400)
       }),
     'code-review: per-turn change feed',
   )

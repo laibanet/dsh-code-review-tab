@@ -37,9 +37,15 @@ start versus turn end, so it shows exactly what the agent changed in that Turn,
 independently of later commits. Editing uses the turn's recorded working
 directory as the resolution base.
 
-Recording starts when this plugin loads, and the list is memory-only: Turns that
-ran before the Host started, or before a DSH restart, are not in the list. The
-working-tree and commit views still cover those files.
+Each recorded turn is also persisted to
+`~/.dsh/code-review-history/<session>.json` (summary plus each file's
+comparison, last 40 turns per session, 6 MiB cap). On the next DSH start the
+view merges those files with the live recorder, so a restart no longer empties
+it. Turns recorded before this persistence existed cannot be recovered: the
+Session log stores the turn number but not the patch.
+
+The view lists turns newest first; a turn from another Session carries a small
+**会话 xxxxxx / Session xxxxxx** chip with that session's short id.
 
 ## Working tree view
 
