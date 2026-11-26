@@ -602,6 +602,43 @@ async function resolveCheckout(ctx, query) {
 }
 
 /**
+ * Resolve a path that may be relative to the repository root or to the
+ * session's working directory (per-turn changes are cwd-relative). The
+ * explicit `base` wins, then `cwd`, then the repository root.
+ * @param {object} ctx plugin context.
+ * @param {URLSearchParams} query request parameters.
+ * @param {string} relative path as the caller supplied it.
+ * @returns {Promise<{absolute: string, stat: import('node:fs').Stats | null}>} the first match.
+ */
+async function findWorkingFile(ctx, query, relative) {
+  const { root, cwd } = await resolveCheckout(ctx, query)
+  const bases = []
+  const explicit = query.get('base') || ''
+  if (explicit) bases.push(explicit)
+  if (cwd) bases.push(cwd)
+  if (root) bases.push(root)
+  const rel = relative.split('\\').join('/')
+  for (const base of bases) {
+    let baseStat = null
+    try {
+      baseStat = await fs.stat(base)
+    } catch {
+      baseStat = null
+    }
+    if (!baseStat || !baseStat.isDirectory()) continue
+    const absolute = path.join(base, rel)
+    let fileStat = null
+    try {
+      fileStat = await fs.stat(absolute)
+    } catch {
+      fileStat = null
+    }
+    if (fileStat && fileStat.isFile()) return { absolute, stat: fileStat }
+  }
+  return { absolute: path.join(bases[0] || '', rel), stat: null }
+}
+
+/**
  * Read the repository overview: branch, HEAD, recent commits and the working
  * tree's changed files with line counts.
  * @param {object} ctx plugin context.
@@ -845,8 +882,6 @@ async function diffBase(root) {
  * @returns {Promise<object>} the file text, or why it cannot be read.
  */
 async function fileContent(ctx, query) {
-  const { root } = await resolveCheckout(ctx, query)
-  if (!root) return { ok: false, error: 'Not a git repository.' }
   const relative = query.get('path') || ''
   if (!isSafeRelativePath(relative)) return { ok: false, error: 'Invalid file path.' }
 
@@ -854,26 +889,28 @@ async function fileContent(ctx, query) {
   const subSha = query.get('subSha') || ''
   const hash = query.get('hash') || ''
   const base = query.get('base') || ''
-
-  let dir = root
-  let rel = relative.split('\\').join('/')
+  const { root } = await resolveCheckout(ctx, query)
+  const rel = relative.split('\\').join('/')
   const subPath = sub.split('\\').join('/')
-  if (subPath && isSafeRelativePath(subPath) && rel.startsWith(`${subPath}/`)) {
-    dir = path.join(root, subPath)
-    rel = rel.slice(subPath.length + 1)
-  } else if (base) {
-    let baseStat = null
-    try {
-      baseStat = await fs.stat(base)
-    } catch {
-      baseStat = null
-    }
-    if (baseStat && baseStat.isDirectory()) dir = base
-  }
-
   const rev = gitlinkSha(subSha) || (/^[0-9a-f]{4,40}$/i.test(hash) ? hash : '')
+
   if (rev) {
-    const out = await gitOrNull(dir, ['show', `${rev}:${rel}`])
+    if (!root) return { ok: false, error: 'Not a git repository.' }
+    let dir = root
+    let revRel = rel
+    if (subPath && isSafeRelativePath(subPath) && revRel.startsWith(`${subPath}/`)) {
+      dir = path.join(root, subPath)
+      revRel = revRel.slice(subPath.length + 1)
+    } else if (base) {
+      let baseStat = null
+      try {
+        baseStat = await fs.stat(base)
+      } catch {
+        baseStat = null
+      }
+      if (baseStat && baseStat.isDirectory()) dir = base
+    }
+    const out = await gitOrNull(dir, ['show', `${rev}:${revRel}`])
     if (out === null) return { ok: false, error: 'This file does not exist in that revision.' }
     if (Buffer.byteLength(out) > MAX_CONTENT_BYTES) {
       return { ok: true, text: out.slice(0, MAX_CONTENT_BYTES), truncated: true, binary: false, tooLarge: true }
@@ -881,14 +918,10 @@ async function fileContent(ctx, query) {
     return { ok: true, text: out, truncated: false, binary: false }
   }
 
-  const absolute = path.join(dir, rel)
-  let stat = null
-  try {
-    stat = await fs.stat(absolute)
-  } catch {
-    stat = null
-  }
-  if (!stat || !stat.isFile()) return { ok: false, error: 'This file is not in the working tree.' }
+  const found = await findWorkingFile(ctx, query, rel)
+  if (!found.stat) return { ok: false, error: 'This file is not in the working tree.' }
+  const absolute = found.absolute
+  const stat = found.stat
   if (stat.size > MAX_CONTENT_BYTES) return { ok: true, text: '', truncated: true, binary: false, tooLarge: true }
   const buffer = await fs.readFile(absolute)
   if (buffer.includes(0)) return { ok: true, text: '', truncated: false, binary: true }
@@ -924,23 +957,10 @@ function readRequestBody(request, limit) {
  * @returns {Promise<object>} the saved mtime, or the failure reason.
  */
 async function writeWorkingFile(ctx, request, query) {
-  const { root } = await resolveCheckout(ctx, query)
-  if (!root) return { ok: false, error: 'Not a git repository.' }
   const relative = query.get('path') || ''
   if (!isSafeRelativePath(relative)) return { ok: false, error: 'Invalid file path.' }
-
-  const base = query.get('base') || ''
-  let dir = root
-  if (base) {
-    let baseStat = null
-    try {
-      baseStat = await fs.stat(base)
-    } catch {
-      baseStat = null
-    }
-    if (baseStat && baseStat.isDirectory()) dir = base
-  }
-  const absolute = path.join(dir, relative)
+  const found = await findWorkingFile(ctx, query, relative)
+  const absolute = found.absolute
 
   let body
   try {
@@ -983,34 +1003,15 @@ async function writeWorkingFile(ctx, request, query) {
  * @returns {Promise<object>} existence and absolute path.
  */
 async function fileInfo(ctx, query) {
-  const { root } = await resolveCheckout(ctx, query)
-  if (!root) return { ok: false, error: 'Not a git repository.' }
   const relative = query.get('path') || ''
   if (!isSafeRelativePath(relative)) return { ok: false, error: 'Invalid file path.' }
-  const base = query.get('base') || ''
-  let origin = root
-  if (base) {
-    let baseStat = null
-    try {
-      baseStat = await fs.stat(base)
-    } catch {
-      baseStat = null
-    }
-    if (baseStat && baseStat.isDirectory()) origin = base
-  }
-  const absolute = path.join(origin, relative)
-  let stat = null
-  try {
-    stat = await fs.stat(absolute)
-  } catch {
-    stat = null
-  }
-  const isFile = Boolean(stat && stat.isFile())
+  const found = await findWorkingFile(ctx, query, relative)
+  const isFile = Boolean(found.stat)
   return {
     ok: true,
     exists: isFile,
-    absolute,
-    size: isFile ? stat.size : 0,
+    absolute: found.absolute,
+    size: isFile ? found.stat.size : 0,
   }
 }
 

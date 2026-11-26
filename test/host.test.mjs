@@ -274,6 +274,14 @@ const contentMissing = await call('content', { path: 'nope.txt' })
 assert.equal(contentMissing.data.ok, false)
 console.log('file content ok')
 
+// A session workspace without git still reads working-tree files (turn paths are cwd-relative).
+const plainDir = mkdtempSync(path.join(tmpdir(), 'crv-plain-'))
+writeFileSync(path.join(plainDir, 'note.txt'), 'plain text\n', 'utf8')
+const plainContent = await callDir(plainDir, 'content', { path: 'note.txt' })
+assert.equal(plainContent.ok, true)
+assert.ok(plainContent.text.includes('plain'))
+console.log('non-git content ok')
+
 // The in-panel editor saves through a guarded write endpoint.
 function mockRequest(body) {
   const listeners = {}
