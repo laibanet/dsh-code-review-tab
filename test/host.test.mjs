@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 // Keep the persisted-turn files out of the real DSH home.
 const historyDir = mkdtempSync(path.join(tmpdir(), 'crv-history-'))
 process.env.DSH_CODE_REVIEW_HISTORY_DIR = historyDir
+process.env.DSH_CODE_REVIEW_SETTINGS_FILE = path.join(historyDir, 'settings.json')
 
 const { apply } = await import(new URL('../index.js', import.meta.url).href)
 
@@ -100,6 +101,20 @@ const override = await callDir(tmpdir(), 'snapshot', { root: dir })
 assert.equal(override.ok, true)
 assert.ok(override.repo, 'root override selects the chosen repository')
 console.log('root override ok:', override.repo.root)
+
+// The chosen folder is stored on the Host, per Session, so a restart keeps it.
+const choice0 = await callDir(tmpdir(), 'repo', { sessionId: 's1' })
+assert.equal(choice0.ok, true)
+assert.equal(choice0.root, '')
+const savedChoice = await post('repo', { sessionId: 's1' }, { root: dir })
+assert.equal(savedChoice.ok, true)
+const choice1 = await callDir(tmpdir(), 'repo', { sessionId: 's1' })
+assert.equal(choice1.root, dir)
+const clearedChoice = await post('repo', { sessionId: 's1' }, { root: '' })
+assert.equal(clearedChoice.ok, true)
+const choice2 = await callDir(tmpdir(), 'repo', { sessionId: 's1' })
+assert.equal(choice2.root, '')
+console.log('repo choice ok')
 
 const wt = await call('worktree')
 assert.equal(wt.data.ok, true)

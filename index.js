@@ -38,6 +38,53 @@ const HISTORY_MAX_TURNS = 40
 const HISTORY_MAX_FILES = 60
 const HISTORY_MAX_BYTES = 6 * 1024 * 1024
 
+/** Host-side, per-Session repository folder choice (survives restarts). */
+const SETTINGS_FILE =
+  process.env.DSH_CODE_REVIEW_SETTINGS_FILE ||
+  path.join(process.env.DSH_HOME || path.join(homedir(), '.dsh'), 'code-review-settings.json')
+
+async function readRepoChoices() {
+  try {
+    const data = JSON.parse(await fs.readFile(SETTINGS_FILE, 'utf8'))
+    return data && typeof data.repos === 'object' && data.repos ? data.repos : {}
+  } catch {
+    return {}
+  }
+}
+
+async function writeRepoChoices(repos) {
+  try {
+    await fs.mkdir(path.dirname(SETTINGS_FILE), { recursive: true })
+    await fs.writeFile(SETTINGS_FILE, JSON.stringify({ repos }, null, 0), 'utf8')
+  } catch {
+    /* persistence is best effort */
+  }
+}
+
+async function repoChoice(ctx, query) {
+  const sessionId = query.get('sessionId') || ''
+  if (!sessionId) return { ok: true, root: '' }
+  const repos = await readRepoChoices()
+  return { ok: true, root: typeof repos[sessionId] === 'string' ? repos[sessionId] : '' }
+}
+
+async function saveRepoChoice(ctx, request, query) {
+  const sessionId = query.get('sessionId') || ''
+  if (!sessionId) return { ok: false, error: 'Missing Session id.' }
+  let body
+  try {
+    body = JSON.parse(await readRequestBody(request, 64 * 1024))
+  } catch {
+    return { ok: false, error: 'Invalid request body.' }
+  }
+  const root = body && typeof body.root === 'string' ? body.root.trim() : ''
+  const repos = await readRepoChoices()
+  if (root) repos[sessionId] = root
+  else delete repos[sessionId]
+  await writeRepoChoices(repos)
+  return { ok: true, root }
+}
+
 /** One persisted session file. */
 function historyFilePath(sessionId) {
   return path.join(HISTORY_DIR, `${encodeURIComponent(sessionId)}.json`)
@@ -1413,6 +1460,7 @@ async function handle(ctx, state, request, response) {
     let payload
     try {
       if (action === 'write') payload = await writeWorkingFile(ctx, request, url.searchParams)
+      else if (action === 'repo') payload = await saveRepoChoice(ctx, request, url.searchParams)
       else payload = { ok: false, error: `Unsupported action: ${action || '(none)'}` }
     } catch (error) {
       payload = { ok: false, error: error instanceof Error ? error.message : String(error) }
@@ -1441,6 +1489,7 @@ async function handle(ctx, state, request, response) {
     else if (action === 'turn') payload = await turnDiff(ctx, url.searchParams, state)
     else if (action === 'file') payload = await fileInfo(ctx, url.searchParams)
     else if (action === 'content') payload = await fileContent(ctx, url.searchParams)
+    else if (action === 'repo') payload = await repoChoice(ctx, url.searchParams)
     else payload = { ok: false, error: `Unknown action: ${action || '(none)'}` }
   } catch (error) {
     payload = { ok: false, error: error instanceof Error ? error.message : String(error) }

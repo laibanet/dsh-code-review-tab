@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.6.1'
+const PLUGIN_VERSION = '2.6.2'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -464,7 +464,7 @@ function inferFenceSource(lang, meta, code) {
   return candidates.find((value) => looksLikeFilePath(value)) || ''
 }
 
-/** Per-Session chosen repository folder (empty = follow the session cwd). */
+/** Per-Session chosen repository folder cached in the browser. */
 function readStoredRepo(sessionId) {
   try {
     const value = localStorage.getItem(`dsh-code-review:root:${sessionId || ''}`)
@@ -482,20 +482,6 @@ function writeStoredRepo(sessionId, value) {
   } catch {
     /* storage may be unavailable */
   }
-}
-
-/** Adopt the pre-2.6.1 global choice once, then drop it. */
-function takeLegacyRepo() {
-  try {
-    const value = localStorage.getItem('dsh-code-review:root')
-    if (value) {
-      localStorage.removeItem('dsh-code-review:root')
-      return value
-    }
-  } catch {
-    /* ignore */
-  }
-  return ''
 }
 
 function splitPath(value) {
@@ -1405,22 +1391,32 @@ window.__ModuleLoader__.load({
         if (noticeTimer.current) clearTimeout(noticeTimer.current)
       }, [])
 
-      // A folder choice belongs to one Session: switching sessions falls back
-      // to that session's own working directory.
+      // A folder choice belongs to one Session and lives on the Host, so it
+      // survives a DSH restart (a new GUI port would otherwise lose it).
       useEffect(() => {
+        let cancelled = false
         const sessionId = scopeRef.current.sessionId || ''
-        let value = readStoredRepo(sessionId)
-        if (!value) {
-          const legacy = takeLegacyRepo()
-          if (legacy) {
-            value = legacy
-            writeStoredRepo(sessionId, legacy)
-          }
-        }
-        repoDirRef.current = value
-        setRepoDir(value)
-        setDirDraft(value)
+        const cached = readStoredRepo(sessionId)
+        repoDirRef.current = cached
+        setRepoDir(cached)
+        setDirDraft(cached)
         setDirOpen(false)
+        if (!sessionId) return () => { cancelled = true }
+        getJson('repo', { sessionId })
+          .then((data) => {
+            if (cancelled) return
+            const value = typeof data.root === 'string' ? data.root : ''
+            writeStoredRepo(sessionId, value)
+            if (value === cached) return
+            repoDirRef.current = value
+            setRepoDir(value)
+            setDirDraft(value)
+            refresh()
+          })
+          .catch(() => {})
+        return () => {
+          cancelled = true
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [scopeKey])
 
@@ -1665,6 +1661,7 @@ window.__ModuleLoader__.load({
         repoDirRef.current = value
         setRepoDir(value)
         writeStoredRepo(sessionId, value)
+        postJson('repo', { sessionId }, { root: value }).catch(() => {})
         setDirOpen(false)
         refresh()
       }, [dirDraft, refresh])
@@ -1675,6 +1672,7 @@ window.__ModuleLoader__.load({
         setRepoDir('')
         setDirDraft('')
         writeStoredRepo(sessionId, '')
+        postJson('repo', { sessionId }, { root: '' }).catch(() => {})
         refresh()
       }, [refresh])
 

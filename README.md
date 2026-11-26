@@ -22,7 +22,7 @@ in this conversation.
 - **右侧改动条**：左半绿色新增、右半红色删除，点击可跳转。
 - **就地编辑**：双击任意 diff 行（或点 **编辑**）直接在面板里改文件——新增行保持绿色、删除行以红色只读行内联显示原文，行号和改动条都在。`Ctrl+S` 保存（带文件被外部修改的冲突保护），`Ctrl+滚轮` 缩放字号，编辑框还可浮窗拖动/改大小或全屏。
 - **聊天代码块带来源**：如果代码块能推断出文件（diff 头、`path=` 元信息、或首行 `// 路径` 注释），上方会显示路径和 **打开** 按钮。
-- **手动选择仓库**：顶栏的 **目录** 按钮可输入任意 Git 仓库的绝对路径，未提交/提交视图改用该仓库；选择**按会话记住**，切换到其他会话时自动回到该会话自己的工作目录（本身是仓库就直接生效），点 **清除** 可恢复跟随会话。
+- **手动选择仓库**：顶栏的 **目录** 按钮可输入任意 Git 仓库的绝对路径，未提交/提交视图改用该仓库；选择**按会话保存在 Host**（`~/.dsh/code-review-settings.json`），重启 DSH 或换端口都不会丢；切换到其他会话时自动回到该会话自己的工作目录，点 **清除** 可移除。
 
 ### 环境要求
 
@@ -39,7 +39,7 @@ dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab
 ```
 
 或者在 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) 下载
-`dsh-code-review-tab-2.6.1.tgz`，用插件管理器安装。
+`dsh-code-review-tab-2.6.2.tgz`，用插件管理器安装。
 
 安装后硬刷新浏览器（`Ctrl+Shift+R`），输入框左侧会出现 **代码改动** 按钮。
 
@@ -103,9 +103,10 @@ MIT，见 [LICENSE](LICENSE)。
   the inferred path and an **打开 / Open** action.
 - **Pick a repository folder** — the top bar's **目录 / Folder** button accepts
   any absolute Git repository path and switches the working-tree/commit views to
-  it. The choice is remembered **per session**; switching to another session
-  falls back to that session's own working directory (a Git repo there just
-  works), and **Clear** removes the override.
+  it. The choice is stored **per session on the Host**
+  (`~/.dsh/code-review-settings.json`), so it survives a restart and a new GUI
+  port; switching sessions falls back to that session's own working directory,
+  and **Clear** removes the override.
 
 ### Requirements
 
@@ -125,7 +126,7 @@ From Git (works today):
 dsh plugin --profile web add git+https://github.com/laibanet/dsh-code-review-tab.git
 ```
 
-Or download `dsh-code-review-tab-2.6.1.tgz` from
+Or download `dsh-code-review-tab-2.6.2.tgz` from
 [Releases](https://github.com/laibanet/dsh-code-review-tab/releases) and install
 it through the Plugin Manager.
 
