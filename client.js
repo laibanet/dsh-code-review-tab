@@ -5,7 +5,7 @@
  */
 
 const NS = 'dsh-code-review'
-const PLUGIN_VERSION = '2.7.0'
+const PLUGIN_VERSION = '2.7.1'
 /** Zero-width marker that prefixes a read-only deleted-line row in the editor buffer. */
 const GHOST_MARK = '\u200B'
 
@@ -1377,6 +1377,8 @@ window.__ModuleLoader__.load({
       const [loading, setLoading] = useState(false)
       const tickRef = useRef(0)
       const diffRef = useRef(null)
+      const listRef = useRef(null)
+      const listScrollRef = useRef({})
       const editorAreaRef = useRef(null)
       const noticeTimer = useRef(0)
 
@@ -1428,8 +1430,6 @@ window.__ModuleLoader__.load({
       }, [scopeKey])
 
       useEffect(() => {
-        commitLimitRef.current = 20
-        setCommitLimit(20)
         setExpandedPath(null)
         setExpandTarget(1)
         setFullFile(null)
@@ -1439,6 +1439,13 @@ window.__ModuleLoader__.load({
         setSaveError('')
         setEditorMode('inline')
       }, [selectedPath, selectedCommit, mode, scopeKey])
+
+      // "Load more" survives switching views; only a session/repository change
+      // starts the commit page over.
+      useEffect(() => {
+        commitLimitRef.current = 20
+        setCommitLimit(20)
+      }, [scopeKey])
 
       useEffect(() => {
         if (!expandedPath || !fullFile || fullFile.loading || fullFile.error || !fullFile.text) return undefined
@@ -1450,6 +1457,18 @@ window.__ModuleLoader__.load({
         })
         return () => cancelAnimationFrame(frame)
       }, [expandedPath, fullFile, expandTarget])
+
+      const scrollKey = selectedCommit ? `commit:${selectedCommit.hash}` : mode
+      const onListScroll = () => {
+        if (listRef.current) listScrollRef.current[scrollKey] = listRef.current.scrollTop
+      }
+      useEffect(() => {
+        const frame = requestAnimationFrame(() => {
+          const element = listRef.current
+          if (element) element.scrollTop = listScrollRef.current[scrollKey] || 0
+        })
+        return () => cancelAnimationFrame(frame)
+      }, [scrollKey, snapshot, turns])
 
       const jumpToLine = useCallback((line) => {
         const container = diffRef.current
@@ -1976,7 +1995,7 @@ window.__ModuleLoader__.load({
         if (commits.length === 0) return h(Empty, { title: t('state.emptyCommits') })
         return h(
           'div',
-          { className: 'crv-list crv-flat' },
+          { className: 'crv-list crv-flat', ref: listRef, onScroll: onListScroll },
           commits.map((commit) => h(CommitRow, { key: commit.hash, commit, onSelect: setSelectedCommit })),
           snapshot.hasMore
             ? h('button', { className: 'crv-more', onClick: loadMoreCommits, disabled: loading }, t('action.loadMore'))
@@ -1994,7 +2013,7 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           { className: 'crv-body' },
-          h('div', { className: 'crv-list' }, renderFileRows(files, worktree.groups || [])),
+          h('div', { className: 'crv-list', ref: listRef, onScroll: onListScroll }, renderFileRows(files, worktree.groups || [])),
           renderDiffPane(files, worktree.truncated),
         )
       }
@@ -2007,7 +2026,7 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           { className: 'crv-body' },
-          h('div', { className: 'crv-list' }, renderFileRows(files, commitDetail.groups || [])),
+          h('div', { className: 'crv-list', ref: listRef, onScroll: onListScroll }, renderFileRows(files, commitDetail.groups || [])),
           renderDiffPane(files, commitDetail.truncated),
         )
       }
@@ -2035,7 +2054,7 @@ window.__ModuleLoader__.load({
           { className: 'crv-body' },
           h(
             'div',
-            { className: 'crv-list' },
+            { className: 'crv-list', ref: listRef, onScroll: onListScroll },
             turns.map((turn) =>
               h(
                 'div',
