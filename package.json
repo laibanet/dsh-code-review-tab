@@ -12,6 +12,14 @@
     "git",
     "diff"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laibanet/dsh-code-review-tab.git"
+  },
+  "homepage": "https://github.com/laibanet/dsh-code-review-tab#readme",
+  "bugs": {
+    "url": "https://github.com/laibanet/dsh-code-review-tab/issues"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
